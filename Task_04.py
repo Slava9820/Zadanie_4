@@ -40,7 +40,7 @@ if __name__ == '__main__':
     c = 3e8
 
     # Время расчета в отсчетах
-    maxTime = 2000
+    maxTime = 1800
 
     #Размер области моделирования в метрах
     X = 0.5
@@ -55,10 +55,10 @@ if __name__ == '__main__':
     dt = Sc * dx / c
 
     # Положение источника в отсчетах
-    sourcePos = 50
+    sourcePos = 100
 
     # Датчики для регистрации поля
-    probesPos = [25,75]
+    probesPos = [75,125]
     probes = [tools.Probe(pos, maxTime) for pos in probesPos]
 
     #1й слой диэлектрика
@@ -84,10 +84,59 @@ if __name__ == '__main__':
     # Магнитная проницаемость
     mu = numpy.ones(maxSize - 1)
 
+    # Где начинается поглощающий диэлектрик слева
+    layer_loss_x_left = 50
+
+    # Где начинается поглощающий диэлектрик справа
+    layer_loss_x_right = 950
+
+    # Потери в среде. Loss = sigma * dt / (2 * eps * eps0)
+    loss = numpy.zeros(maxSize)
+    loss[layer_loss_x_right:] = 0.02
+    loss[:layer_loss_x_left] = 0.02
+
+    # Коэффициенты для расчета поля Е
+    ceze = (1 - loss) / (1 + loss)
+    cezh = W0 / (eps * (1 + loss))
+
+    # Коэффициенты для расчеты поля Н
+    chyh = (1 - loss) / (1 + loss)
+    chye = 1 / (W0 * (1 + loss))
+
+    # Усреднение коэффициентов на границе поглощающего слоя
+    ceze[layer_loss_x_left] = (ceze[layer_loss_x_left - 1]
+                               + ceze[layer_loss_x_left + 1]) / 2
+    cezh[layer_loss_x_left] = (cezh[layer_loss_x_left - 1]
+                          + cezh[layer_loss_x_left + 1]) / 2
+
+    ceze[layer_loss_x_right] = (ceze[layer_loss_x_right - 1]
+                               + ceze[layer_loss_x_right + 1]) / 2
+    cezh[layer_loss_x_right] = (cezh[layer_loss_x_right - 1]
+                          + cezh[layer_loss_x_right + 1]) / 2
+
     Ez = numpy.zeros(maxSize)
     Hy = numpy.zeros(maxSize - 1)
 
-    source = GaussianModPlaneWave(100.0, 30.0, 25.0, eps[sourcePos], mu[sourcePos])
+    # Максимальная и манимальная частоты для отображения
+    # графика зависимости коэффициента отражения от частоты
+    Fmin = 5e9
+    Fmax = 30e9
+
+    # Параметры возбуждающего сигнала - модулированного гауссова импульса
+    A0 = 100
+    Amax = 100
+    f0 = (Fmax + Fmin) / 2
+    N1 = 1 / f0
+    DeltaF = Fmax - Fmin
+
+    wg = 2 * numpy.sqrt(numpy.log(Amax)) / (numpy.pi * DeltaF)
+    dg = wg * numpy.sqrt(numpy.log(A0))
+
+    wg = wg / dt
+    dg = dg / dt
+    N1 = Sc * N1 / dt
+
+    source = GaussianModPlaneWave(dg, wg, N1, eps[sourcePos], mu[sourcePos])
     
     # Параметры отображения поля E
     display_field = Ez
@@ -109,8 +158,8 @@ if __name__ == '__main__':
     display.drawBoundary(layer_2)
 
     for q in range(maxTime):
-        # Расчет компоненты поля H
-        Hy = Hy + (Ez[1:] - Ez[:-1]) * Sc / (W0 * mu)
+        # Расчет компоненты поля Н
+        Hy = chyh[:-1] * Hy + chye[:-1] * (Ez[1:] - Ez[:-1])
 
         # Источник возбуждения с использованием метода
         # Total Field / Scattered Field
@@ -122,7 +171,7 @@ if __name__ == '__main__':
 
         # Расчет компоненты поля E
         Hy_shift = Hy[:-1]
-        Ez[1:-1] = Ez[1:-1] + (Hy[1:] - Hy_shift) * Sc * W0 / eps[1:-1]
+        Ez[1:-1] = ceze[1:-1] * Ez[1:-1] + cezh[1:-1] * (Hy[1:] - Hy_shift)
 
         # Источник возбуждения с использованием метода
         # Total Field / Scattered Field
@@ -169,12 +218,12 @@ if __name__ == '__main__':
     # Построение спектра падающего и рассеянного поля
     plt.figure()
     plt.plot(f * 1e-9, FallSpectr / numpy.max(FallSpectr))
-    plt.plot(f * 1e-9, ScatteredSpectr / numpy.max(ScatteredSpectr))
+    plt.plot(f * 1e-9, ScatteredSpectr / numpy.max(FallSpectr))
     plt.grid()
-    plt.xlim(0, 50e9 * 1e-9)
+    plt.xlim(0, 35e9 * 1e-9)
     plt.xlabel('f, ГГц')
     plt.ylabel('|S/Smax|')
-    plt.legend(['Спектр падающего поля', 'Спектр отраженного поля'])
+    plt.legend(['Спектр падающего поля', 'Спектр отраженного поля'], loc=1)
 
     # Определение коэффициента отражения и построения графика
     plt.figure()
